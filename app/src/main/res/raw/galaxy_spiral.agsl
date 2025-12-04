@@ -1,0 +1,153 @@
+// ==========================================
+// GALAXY SPIRAL SHADER - AGSL
+// ==========================================
+
+uniform float2 resolution;
+uniform float time;
+
+// Paramètres de la spirale
+uniform float spiralTightness;      // Serrage de la spirale (défaut: 3.0)
+uniform float numArms;              // Nombre de bras (défaut: 5.0)
+uniform float rotationSpeed;        // Vitesse de rotation globale (défaut: 0.3)
+uniform float vortexRotationSpeed;  // Vitesse rotation différentielle (défaut: 0.2)
+
+// Paramètres visuels
+uniform float armIntensity;         // Intensité des bras principaux (défaut: 3.0)
+uniform float secondaryArmPower;    // Puissance bras secondaires (défaut: 4.0)
+uniform float centerGlowIntensity;  // Intensité du glow central (défaut: 1.5)
+uniform float centerGlowRadius;     // Rayon du glow central (défaut: 8.0)
+uniform float fadeOutStrength;      // Force du fade extérieur (défaut: 0.7)
+
+// Paramètres de bruit cosmique
+uniform float noiseScale;           // Échelle du bruit (défaut: 3.0)
+uniform float noiseSpeed;           // Vitesse du bruit (défaut: 0.1)
+uniform float noiseIntensity;       // Intensité du bruit (défaut: 0.15)
+
+// Palette de couleurs (5 couleurs)
+uniform float3 color1;  // Bleu foncé (défaut: 0.05, 0.0, 0.2)
+uniform float3 color2;  // Violet profond (défaut: 0.2, 0.0, 0.5)
+uniform float3 color3;  // Magenta (défaut: 0.5, 0.0, 0.8)
+uniform float3 color4;  // Rose/Violet clair (défaut: 0.8, 0.2, 1.0)
+uniform float3 color5;  // Bleu cyan (défaut: 0.3, 0.6, 1.0)
+
+// Couleur des highlights
+uniform float3 highlightColor;      // Couleur accents lumineux (défaut: 0.5, 0.3, 1.0)
+uniform float highlightPower;       // Puissance des highlights (défaut: 8.0)
+uniform float highlightIntensity;   // Intensité des highlights (défaut: 2.0)
+
+// Étoiles
+uniform float starDensity;          // Densité des étoiles (défaut: 200.0)
+uniform float starIntensity;        // Intensité des étoiles (défaut: 0.8)
+uniform float starSpeed;            // Vitesse scintillement (défaut: 0.5)
+
+// ==========================================
+// FONCTIONS UTILITAIRES
+// ==========================================
+
+float hash(float2 p) {
+    p = fract(p * float2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+}
+
+float noise(float2 p) {
+    float2 i = floor(p);
+    float2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+
+    float a = hash(i);
+    float b = hash(i + float2(1.0, 0.0));
+    float c = hash(i + float2(0.0, 1.0));
+    float d = hash(i + float2(1.0, 1.0));
+
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+float fbm(float2 p) {
+    float value = 0.0;
+    float amplitude = 0.5;
+    float frequency = 1.0;
+
+    for(int i = 0; i < 5; i++) {
+        value += amplitude * noise(p * frequency);
+        frequency *= 2.0;
+        amplitude *= 0.5;
+    }
+    return value;
+}
+
+// ==========================================
+// MAIN SHADER
+// ==========================================
+
+half4 main(float2 fragCoord) {
+    // Normalisation des coordonnées
+    float2 uv = (fragCoord - resolution * 0.5) / resolution.y;
+
+    // Conversion en coordonnées polaires
+    float radius = length(uv);
+    float angle = atan(uv.y, uv.x);
+
+    // Rotation animée
+    float rotation = time * rotationSpeed;
+    angle += rotation;
+
+    // Création de la spirale logarithmique
+    float spiralAngle = log(radius + 0.001) * spiralTightness + angle * numArms;
+
+    // Intensité des bras spiralés
+    float spiral = sin(spiralAngle) * 0.5 + 0.5;
+    spiral = pow(spiral, armIntensity);
+
+    // Ajout de bras secondaires pour plus de détails
+    float spiral2 = sin(spiralAngle * 2.0 - time) * 0.5 + 0.5;
+    spiral2 = pow(spiral2, secondaryArmPower);
+
+    // Vortex central - distorsion vers le centre
+    float vortex = 1.0 - smoothstep(0.0, 0.3, radius);
+
+    // Ajout de rotation différentielle (plus rapide au centre)
+    float rotSpeed = (1.0 - radius) * 2.0;
+    angle += rotSpeed * time * vortexRotationSpeed;
+
+    // Bruit cosmique pour texture
+    float2 noiseCoord = uv * noiseScale + time * noiseSpeed;
+    float cosmicNoise = fbm(noiseCoord);
+
+    // Combinaison des éléments
+    float intensity = spiral * (1.0 + spiral2 * 0.5);
+    intensity *= (1.0 - radius * fadeOutStrength); // Fade vers l'extérieur
+    intensity += vortex * 0.8; // Boost au centre
+    intensity += cosmicNoise * noiseIntensity; // Texture cosmique
+
+    // Gradient de couleur basé sur l'intensité
+    float3 finalColor;
+
+    if(intensity < 0.3) {
+        finalColor = mix(color1, color2, intensity / 0.3);
+    } else if(intensity < 0.5) {
+        finalColor = mix(color2, color3, (intensity - 0.3) / 0.2);
+    } else if(intensity < 0.7) {
+        finalColor = mix(color3, color4, (intensity - 0.5) / 0.2);
+    } else {
+        finalColor = mix(color4, color5, (intensity - 0.7) / 0.3);
+    }
+
+    // Accents lumineux dans les bras de la spirale
+    float highlights = pow(spiral, highlightPower) * (1.0 - radius);
+    finalColor += highlightColor * highlights * highlightIntensity;
+
+    // Glow du centre (trou noir lumineux)
+    float centerGlow = exp(-radius * centerGlowRadius) * centerGlowIntensity;
+    finalColor += float3(0.6, 0.3, 1.0) * centerGlow;
+
+    // Assombrissement du fond
+    float background = smoothstep(1.0, 0.5, radius);
+    finalColor *= background;
+
+    // Étoiles scintillantes
+    float stars = pow(hash(floor(uv * starDensity + time * starSpeed)), 20.0);
+    finalColor += stars * (1.0 - vortex) * starIntensity;
+
+    return half4(half3(finalColor), 1.0);
+}
